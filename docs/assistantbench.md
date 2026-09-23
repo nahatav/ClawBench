@@ -24,7 +24,7 @@ footer wording against a bundled `claw-eval` task so the two cannot drift.
 
 | ClawBench | AssistantBench |
 | --- | --- |
-| `metadata.source_task_id` | `id`, verbatim — the real key |
+| `metadata.source_task_id` | `id`, verbatim, the real key |
 | `metadata.task_id` | `600000 + n`, n over ids in sorted order |
 | `metadata.class` | the expertise field inside `metadata` |
 | `metadata.sites_involved` | hostnames parsed out of `gold_url` |
@@ -88,11 +88,11 @@ exact match, and accuracy by difficulty.
 (Apache-2.0), whose string metric comes from DROP's `drop_eval`. It dispatches on
 the shape of the gold answer:
 
-- **number** — `1 - log(ratio)`, floored at 0, so being out by a factor of two keeps
+- **number**: `1 - log(ratio)`, floored at 0, so being out by a factor of two keeps
   partial credit and an order of magnitude earns none;
-- **string** — token F1 after normalization, gated on the numbers agreeing, so
+- **string**: token F1 after normalization, gated on the numbers agreeing, so
   "3 bedrooms" never matches "4 bedrooms";
-- **record list** — pairwise F1 over key-value records under an optimal 1-1
+- **record list**: pairwise F1 over key-value records under an optimal 1-1
   alignment, with the denominator being the longer of the two lists, so extra
   records dilute the score.
 
@@ -107,7 +107,7 @@ Checked against the upstream evaluator running under `numpy` 2.5.3 and `scipy`
 1.18.1 over 7249 `(prediction, gold)` pairs: the 3249-pair exhaustive product of a
 corpus covering all four answer types, plus 4000 fuzzed pairs. On all 6581 pairs
 upstream could score, the two agree exactly, to 1e-9, on both accuracy and answer
-rate. On the remaining 668 upstream raises from a malformed prediction — a record
+rate. On the remaining 668 upstream raises from a malformed prediction: a record
 object answering a numeric question, `null`, `true`, a bare list; the port scores
 those 0.0 rather than taking down the batch. Every deviation is enumerated in the
 module docstring, including the upstream quirks kept on purpose (`,` read as a

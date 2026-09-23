@@ -1,4 +1,4 @@
-"""``clawbench-assistantbench-adapt`` — import AssistantBench as a ClawBench suite (#188).
+"""``clawbench-assistantbench-adapt``: import AssistantBench as a ClawBench suite (#188).
 
 `AssistantBench <https://huggingface.co/datasets/AssistantBench/AssistantBench>`_
 (Yoran et al., `arXiv:2407.15711 <https://arxiv.org/abs/2407.15711>`_) is 214 live-web

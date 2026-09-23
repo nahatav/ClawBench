@@ -1,4 +1,4 @@
-"""``clawbench-assistantbench-score`` — AssistantBench answer accuracy as a third stage (#188).
+"""``clawbench-assistantbench-score``: AssistantBench answer accuracy as a third stage (#188).
 
 ClawBench scores a run in two stages: Stage-1 asks whether the agent produced the
 request ``eval_schema`` describes, Stage-2 asks the LLM judge whether that request
