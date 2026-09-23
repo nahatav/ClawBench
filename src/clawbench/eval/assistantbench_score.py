@@ -532,7 +532,13 @@ _DIFFICULTIES = ("Easy", "Medium", "Hard")
 
 
 def aggregate(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Leaderboard-shaped aggregate over per-task ``{score, has_ans, difficulty}``."""
+    """Leaderboard-shaped aggregate over per-run ``{score, has_ans, difficulty}``.
+
+    Every metric averages over *runs*, matching how ``clawbench-analyze``
+    aggregates. ``tasks`` counts the distinct cases behind those runs, so a
+    caller can see when a case was run more than once and the averages are no
+    longer one-per-task.
+    """
     scores = [float(r["score"]) for r in records]
     answered = [float(r["has_ans"]) for r in records]
     answered_scores = [float(r["score"]) for r in records if float(r["has_ans"]) == 1.0]
@@ -551,8 +557,10 @@ def aggregate(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
         counts[level] = len(level_scores)
         by_difficulty[level] = pct(_mean(level_scores)) if level_scores else None
 
+    cases = {str(r["case_name"]) for r in records if r.get("case_name")}
     return {
-        "tasks": len(records),
+        "runs": len(records),
+        "tasks": len(cases) or len(records),
         "accuracy": pct(_mean(scores)),
         "answer_rate": pct(_mean(answered)),
         "precision": pct(_mean(answered_scores)) if answered_scores else 0.0,
@@ -666,25 +674,33 @@ def _case_name(run_dir: Path) -> str:
 def discover_runs(runs_dir: Path) -> list[Path]:
     """Every run directory under ``runs_dir``, at any nesting depth.
 
-    ``clawbench-batch`` writes ``<base>/<model>/<run>/``, but a single
-    ``clawbench-run`` writes ``<base>/<run>/``, and users pass both. A directory
-    counts as a run when it holds a ``run-meta.json`` or a ``data/`` subtree.
+    ``clawbench-batch`` writes ``<base>/<model>/<run>/``, a single
+    ``clawbench-run`` writes ``<base>/<run>/``, and users pass both. Discovery
+    matches ``clawbench-analyze``: a directory counts as a run when it holds a
+    ``run-meta.json`` or a ``data/interception.json``.
     """
     if (runs_dir / "run-meta.json").is_file():
         return [runs_dir]
-    found = {
-        path.parent
-        for pattern in ("*/run-meta.json", "*/*/run-meta.json", "*/*/*/run-meta.json")
-        for path in runs_dir.glob(pattern)
-    }
-    if not found:
-        found = {
-            path.parent
-            for pattern in ("*/data", "*/*/data")
-            for path in runs_dir.glob(pattern)
-            if path.is_dir()
-        }
+    found = {path.parent for path in runs_dir.rglob("run-meta.json")}
+    found |= {path.parent.parent for path in runs_dir.rglob("data/interception.json")}
     return sorted(found)
+
+
+def models_in(runs: Sequence[Path]) -> set[str]:
+    """Distinct model names recorded across these runs."""
+    models: set[str] = set()
+    for run_dir in runs:
+        meta_path = run_dir / "run-meta.json"
+        if not meta_path.is_file():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        model = meta.get("model") if isinstance(meta, dict) else None
+        if isinstance(model, str) and model:
+            models.add(model)
+    return models
 
 
 def score_runs(
@@ -754,7 +770,15 @@ def format_report(summary: dict[str, Any], records: Sequence[dict[str, Any]]) ->
     lines = [
         "# AssistantBench answer accuracy",
         "",
-        f"Tasks scored: {summary['tasks']}",
+        f"Runs scored: {summary['runs']} over {summary['tasks']} task(s)",
+    ]
+    if summary["runs"] != summary["tasks"]:
+        lines.append("")
+        lines.append(
+            "Some tasks were run more than once. Every metric below averages over "
+            "runs, so a repeated task weighs more than one run once."
+        )
+    lines += [
         "",
         "| Metric | Value |",
         "| --- | --- |",
@@ -815,6 +839,15 @@ def build_parser() -> argparse.ArgumentParser:
             "run-meta.json (off by default: this edits existing run output)"
         ),
     )
+    p.add_argument(
+        "--allow-mixed-models",
+        action="store_true",
+        help=(
+            "Score runs from several models together. Off by default: pointing "
+            "at test-output/ instead of test-output/<model> would otherwise "
+            "average models into one meaningless leaderboard row"
+        ),
+    )
     return p
 
 
@@ -838,6 +871,18 @@ def main(argv: list[str] | None = None) -> int:
     runs = discover_runs(args.runs_dir)
     if not runs:
         print(f"ERROR: no run directories under {args.runs_dir}", file=sys.stderr)
+        return 1
+
+    models = models_in(runs)
+    if len(models) > 1 and not args.allow_mixed_models:
+        print(
+            "ERROR: these runs span "
+            + f"{len(models)} models ({', '.join(sorted(models))}). "
+            "A leaderboard row describes one model, so point at one model's "
+            "directory (test-output/<model>), or pass --allow-mixed-models if "
+            "you really want them averaged together.",
+            file=sys.stderr,
+        )
         return 1
 
     records, unmatched = score_runs(runs, gold)

@@ -81,6 +81,14 @@ because it edits run output you already have.
 The scorer prints the upstream leaderboard's row: accuracy, answer rate, precision,
 exact match, and accuracy by difficulty.
 
+Two things to know about what it averages over. Every metric averages over *runs*,
+the way `clawbench-analyze` does, so a task you ran twice weighs twice; the report
+says so whenever the run count and the distinct-task count differ. And a
+leaderboard row describes one model, so the scorer refuses a directory whose runs
+span several models rather than averaging them into a number that means nothing.
+Point it at `test-output/<model>`, or pass `--allow-mixed-models` if you really
+want them pooled.
+
 ## The metric
 
 `clawbench.eval.assistantbench_score` re-implements the `evaluation/` package of the

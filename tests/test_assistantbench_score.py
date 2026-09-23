@@ -246,11 +246,12 @@ def test_an_ungradeable_answer_shape_scores_zero_instead_of_raising() -> None:
 
 def test_aggregate_matches_leaderboard_formulas() -> None:
     records = [
-        {"score": 1.0, "has_ans": 1.0, "difficulty": "Easy"},
-        {"score": 0.5, "has_ans": 1.0, "difficulty": "Hard"},
-        {"score": 0.0, "has_ans": 0.0, "difficulty": "Hard"},
+        {"score": 1.0, "has_ans": 1.0, "difficulty": "Easy", "case_name": "a"},
+        {"score": 0.5, "has_ans": 1.0, "difficulty": "Hard", "case_name": "b"},
+        {"score": 0.0, "has_ans": 0.0, "difficulty": "Hard", "case_name": "c"},
     ]
     summary = abs_score.aggregate(records)
+    assert summary["runs"] == 3
     assert summary["tasks"] == 3
     assert summary["accuracy"] == 50.0
     assert summary["answer_rate"] == 66.7
@@ -267,10 +268,25 @@ def test_aggregate_matches_leaderboard_formulas() -> None:
 
 def test_aggregate_with_no_answered_tasks_reports_zero_precision() -> None:
     summary = abs_score.aggregate(
-        [{"score": 0.0, "has_ans": 0.0, "difficulty": "Easy"}]
+        [{"score": 0.0, "has_ans": 0.0, "difficulty": "Easy", "case_name": "a"}]
     )
     assert summary["precision"] == 0.0
     assert summary["answer_rate"] == 0.0
+
+
+def test_aggregate_counts_runs_and_distinct_tasks_separately() -> None:
+    """Averages are per run, as in clawbench-analyze; a repeat weighs twice."""
+    records = [
+        {"score": 1.0, "has_ans": 1.0, "difficulty": "Easy", "case_name": "a"},
+        {"score": 0.0, "has_ans": 1.0, "difficulty": "Easy", "case_name": "a"},
+    ]
+    summary = abs_score.aggregate(records)
+    assert summary["runs"] == 2
+    assert summary["tasks"] == 1
+    assert summary["accuracy"] == 50.0
+    assert "run more than once" in abs_score.format_report(
+        summary, [{**r, "answered": True} for r in records]
+    )
 
 
 # --------------------------------------------------------------------------
@@ -278,11 +294,18 @@ def test_aggregate_with_no_answered_tasks_reports_zero_precision() -> None:
 # --------------------------------------------------------------------------
 
 
-def _make_run(root: Path, name: str, case: str, answer: object | None) -> Path:
+def _make_run(
+    root: Path,
+    name: str,
+    case: str,
+    answer: object | None,
+    model: str = "glm-5.1",
+) -> Path:
     run_dir = root / name
     (run_dir / "data").mkdir(parents=True)
     (run_dir / "run-meta.json").write_text(
-        json.dumps({"test_case": case, "harness": "openclaw"}), encoding="utf-8"
+        json.dumps({"test_case": case, "harness": "openclaw", "model": model}),
+        encoding="utf-8",
     )
     if answer is not None:
         (run_dir / "data" / "interception.json").write_text(
@@ -490,3 +513,34 @@ def test_cli_errors_when_no_run_matches_gold(tmp_path: Path) -> None:
     root = tmp_path / "out"
     _make_run(root, "run-1", "ab-unknown", "Paris")
     assert abs_score.main([str(root), "--gold", str(_gold_file(tmp_path))]) == 1
+
+
+def test_cli_refuses_to_average_several_models_together(tmp_path: Path, capsys) -> None:
+    """Pointing at test-output/ instead of test-output/<model> is an easy slip."""
+    root = tmp_path / "out"
+    _make_run(root / "model-a", "run-1", "ab-aaa-x", "Paris", model="model-a")
+    _make_run(root / "model-b", "run-2", "ab-bbb-y", "Rome", model="model-b")
+    gold = _gold_file(tmp_path)
+
+    assert abs_score.main([str(root), "--gold", str(gold)]) == 1
+    err = capsys.readouterr().err
+    assert "span 2 models" in err
+    assert "model-a, model-b" in err
+
+    assert abs_score.main([str(root), "--gold", str(gold), "--allow-mixed-models"]) == 0
+
+
+def test_discover_runs_reaches_arbitrary_nesting(tmp_path: Path) -> None:
+    deep = tmp_path / "a" / "b" / "c" / "model"
+    _make_run(deep, "run-1", "ab-aaa-x", "Paris")
+    assert abs_score.discover_runs(tmp_path) == [deep / "run-1"]
+
+
+def test_models_in_ignores_runs_without_usable_metadata(tmp_path: Path) -> None:
+    root = tmp_path / "out"
+    run = _make_run(root, "run-1", "ab-aaa-x", "Paris", model="model-a")
+    broken = _make_run(root, "run-2", "ab-bbb-y", "Rome")
+    (broken / "run-meta.json").write_text("not json", encoding="utf-8")
+    missing = _make_run(root, "run-3", "ab-aaa-x", "Paris")
+    (missing / "run-meta.json").unlink()
+    assert abs_score.models_in([run, broken, missing]) == {"model-a"}
